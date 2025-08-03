@@ -1,0 +1,10 @@
+{
+  "bienvenida": "Bienvenido a MIRA",
+  "iniciar_sesion": "Iniciar sesión",
+  "registrarse": "Registrarse",
+  "cerrar_sesion": "Cerrar sesión",
+  "idioma": "Idioma",
+  "tema": "Tema",
+  "oscuro": "Oscuro",
+  "claro": "Claro"
+}
