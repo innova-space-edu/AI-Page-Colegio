@@ -5,8 +5,13 @@ import dotenv from 'dotenv';
 import { verifyFirebaseToken } from './auth.js';
 import { saveChat, loadChat } from './chat_storage.js';
 import {
-  isImagePrompt, isPlotPrompt, isSummaryPrompt, isTranslatePrompt, isStatsPrompt, isAnimatePrompt,
-  extractTable, detectTableInText
+  isImagePrompt,
+  isPlotPrompt,
+  isSummaryPrompt,
+  isTranslatePrompt,
+  isStatsPrompt,
+  isAnimatePrompt,
+  detectTableInText
 } from './utils.js';
 
 dotenv.config();
@@ -14,43 +19,65 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// CORS permite Authorization header y múltiples orígenes
-app.use(cors({
-  origin: [/^http:\/\/localhost(:\d+)?$/, /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/],
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
-app.use(express.json({ limit: '25mb' })); // Para imágenes base64
+// CORS dinámico con lista blanca
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:3000')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
 
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin ||
+        ALLOWED_ORIGINS.includes(origin) ||
+        /^http:\/\/localhost(:\d+)?$/.test(origin) ||
+        /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/.test(origin)) {
+      return cb(null, true);
+    }
+    return cb(new Error('Origin not allowed by CORS'));
+  },
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
+
+app.use(express.json({ limit: '25mb' })); // Soporta imágenes base64
+
+// Endpoint de salud
+app.get('/health', (_, res) => res.json({ status: 'ok', service: 'backend-router' }));
+
+// Protección con Firebase
 app.use(verifyFirebaseToken);
 
+// Endpoint principal de chat
 app.post('/api/chat', async (req, res) => {
-  console.log('🔔 /api/chat payload:', req.body);
   try {
-    const { messages, imageBase64 } = req.body;
-    const userId = req.userId;
-    const lastUserMsg = messages.filter(m => m.role === 'user').slice(-1)[0]?.content || '';
+    const { messages = [], imageBase64 } = req.body || {};
+    const userId = req.userId || 'anonymous';
+    const lastUser = [...messages].reverse().find(m => m.role === 'user');
+    const lastUserMsg = lastUser?.content?.trim() || '';
+    let extra = {};
 
-    // 1. IMÁGENES: OCR, BLIP, etc.
+    // 1. Manejo de imágenes (OCR o BLIP)
     if (imageBase64) {
-      let url = process.env.PYTHON_BLIP_URL || 'http://localhost:5002/blip';
-      if (isImagePrompt(lastUserMsg)) url = process.env.PYTHON_OCR_URL || 'http://localhost:5001/ocr';
-
-      const imgRes = await fetch(url, {
+      const useOCR = isImagePrompt(lastUserMsg);
+      const url = useOCR
+        ? (process.env.PYTHON_OCR_URL || 'http://localhost:5001/ocr')
+        : (process.env.PYTHON_BLIP_URL || 'http://localhost:5002/blip');
+      const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: imageBase64, prompt: lastUserMsg })
       });
-      const imgData = await imgRes.json();
+      const data = await resp.json();
       const aiMsg = {
         role: 'assistant',
-        content: imgData.description || imgData.text || 'Imagen procesada.',
-        tags: imgData.tags || [],
-        scene: imgData.scene || null,
+        content: data.description || data.text || 'Imagen procesada.',
+        tags: data.tags || [],
+        scene: data.scene || null,
         suggestions: [
-          "¿Quieres analizar otra imagen?",
-          "¿Te explico los pasos?",
-          "¿Deseas guardar esta respuesta?"
+          '¿Quieres analizar otra imagen?',
+          '¿Te explico los pasos?',
+          '¿Deseas guardar esta respuesta?'
         ]
       };
       await saveChat(userId, [...messages, aiMsg]);
@@ -62,109 +89,113 @@ app.post('/api/chat', async (req, res) => {
       });
     }
 
-    // 2. GRÁFICOS automáticos si detecta gráfico o tabla en texto o respuesta previa
-    let extra = {};
+    // 2. Detección de gráficos
     if (isPlotPrompt(lastUserMsg)) {
       const plotRes = await fetch(process.env.PYTHON_PLOT_URL || 'http://localhost:5000/plot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: lastUserMsg })
       });
-      const plotData = await plotRes.json();
-      extra.plot = plotData;
+      extra.plot = await plotRes.json();
     }
 
-    // TABLAS: Detecta y grafica automáticamente
+    // Detección de tablas en texto
     const tabla = detectTableInText(lastUserMsg);
     if (tabla) {
-      const barsRes = await fetch(process.env.PYTHON_PLOT_URL?.replace('/plot','/bars') || 'http://localhost:5000/bars', {
+      const barsUrl = (process.env.PYTHON_PLOT_URL || 'http://localhost:5000/plot').replace('/plot', '/bars');
+      const barsRes = await fetch(barsUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(tabla)
       });
-      const barsData = await barsRes.json();
-      extra.bars = barsData;
+      extra.bars = await barsRes.json();
     }
 
-    // 3. INTENCIÓN: resumen, traducción, stats, animación, etc.
+    // 3. Tareas globales: resumen, traducción, estadísticas, animación
+    const GLOBAL = process.env.PYTHON_GLOBAL_URL || 'http://localhost:5005';
     if (isSummaryPrompt(lastUserMsg)) {
-      const summaryRes = await fetch(process.env.PYTHON_GLOBAL_URL || 'http://localhost:5005/summary', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+      const resSum = await fetch(`${GLOBAL}/summary`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: lastUserMsg })
       });
-      const summaryData = await summaryRes.json();
-      extra.summary = summaryData.summary;
+      extra.summary = (await resSum.json()).summary;
     }
     if (isTranslatePrompt(lastUserMsg)) {
-      const translateRes = await fetch(process.env.PYTHON_GLOBAL_URL || 'http://localhost:5005/translate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: lastUserMsg, to: "en" }) // o detecta idioma destino
+      const resTrans = await fetch(`${GLOBAL}/translate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: lastUserMsg, to: 'en' })
       });
-      const translateData = await translateRes.json();
-      extra.translation = translateData.translated;
+      extra.translation = (await resTrans.json()).translated;
     }
     if (isStatsPrompt(lastUserMsg) || tabla) {
-      const statsRes = await fetch(process.env.PYTHON_GLOBAL_URL || 'http://localhost:5005/stats', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+      const resStats = await fetch(`${GLOBAL}/stats`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ values: tabla?.values || [] })
       });
-      const statsData = await statsRes.json();
-      extra.stats = statsData;
+      extra.stats = await resStats.json();
     }
     if (isAnimatePrompt(lastUserMsg)) {
-      const animRes = await fetch(process.env.PYTHON_GLOBAL_URL || 'http://localhost:5005/animate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+      const resAnim = await fetch(`${GLOBAL}/animate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: lastUserMsg })
       });
-      const animData = await animRes.json();
-      extra.animation = animData.url;
+      extra.animation = (await resAnim.json()).url;
     }
 
-    // 4. Decide el modelo: Qwen para fórmulas y cálculos, Llama 4 para todo lo demás
-    let useQwen = /(fórmula|ecuación|gráfic|derivada|integral|resuelve|resolver|expresión|tabla|matriz|valor|estadística|desviación|promedio|media|función|explica.*fórmula)/i.test(lastUserMsg) || !!tabla;
-    let modelUrl, headers, body;
-    if (useQwen) {
-      modelUrl = "https://api.endpointhf.com/v1/chat/completions";
+    // 4. Construir mensaje system y decidir modelo
+    const systemMsg = {
+      role: 'system',
+      content: `
+Eres MIRA (Innova Space). Responde en español de forma clara y estructurada.
+Si te piden una fórmula, derivada, tabla o gráfico: primero explica el concepto; después proporciona la fórmula o tabla en formato Markdown/LaTeX; finalmente repite en una sola línea el formato "y = ..." si aplica para graficar.
+Si te piden un resumen, empieza con "Aquí tienes el resumen:".
+Si te piden traducir, termina la respuesta solo con el texto traducido.
+Si hay una tabla de datos, entrega los valores y etiquetas claros, separados por punto y coma.
+      `.trim()
+    };
+    const modelMessages = [systemMsg, ...messages];
+    const wantsMath = /(fórmula|ecuación|gráfic|derivada|integral|resuelve|resolver|expresión|tabla|matriz|valor|estadística|desviación|promedio|media|función|explica.*fórmula)/i.test(lastUserMsg) || !!tabla;
+
+    let modelUrl;
+    let headers;
+    let body;
+    if (wantsMath && process.env.QWEN_API_KEY) {
+      modelUrl = 'https://api.endpointhf.com/v1/chat/completions';
       headers = {
-        "Authorization": `Bearer ${process.env.QWEN_API_KEY}`,
-        "Content-Type": "application/json"
+        'Authorization': `Bearer ${process.env.QWEN_API_KEY}`,
+        'Content-Type': 'application/json'
       };
-      body = { model: "Qwen/Qwen1.5-32B-Chat", messages, temperature: 0.7 };
+      body = { model: 'Qwen/Qwen1.5-32B-Chat', messages: modelMessages, temperature: 0.7 };
     } else {
-      modelUrl = "https://api.groq.com/openai/v1/chat/completions";
+      modelUrl = 'https://api.groq.com/openai/v1/chat/completions';
       headers = {
-        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
-        "Content-Type": "application/json"
+        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+        'Content-Type': 'application/json'
       };
-      body = { model: "meta-llama/llama-4-scout-17b-16e-instruct", messages, temperature: 0.7 };
+      body = { model: 'meta-llama/llama-4-scout-17b-16e-instruct', messages: modelMessages, temperature: 0.7 };
     }
 
-    // PROMPT SUGERIDO PARA MEJOR FORMATO:
-    body.system = `
-      Si el usuario te pide una fórmula, derivada, tabla o gráfico, primero explica claro el concepto en español, luego da la fórmula o tabla en formato Markdown, y al final repite la fórmula en una línea como: y = ... para que el sistema la pueda graficar.
-      Si piden un resumen, di: "Aquí tienes el resumen", y si piden traducir, entrega solo la traducción al final.
-      Si hay una tabla de datos, da los valores y etiquetas claros, separados por punto y coma.
-    `;
-
-    // Consulta al modelo
     const modelRes = await fetch(modelUrl, {
-      method: "POST",
+      method: 'POST',
       headers,
       body: JSON.stringify(body)
     });
     const data = await modelRes.json();
-    console.log('🔹 Model responde:', data);
-
     const content = data.choices?.[0]?.message?.content || 'Sin respuesta.';
-    let suggestions = [
-      "¿Quieres ver un ejemplo?",
-      "¿Te gustaría intentarlo tú mismo?",
-      "¿Necesitas una explicación gráfica?"
+
+    const suggestions = [
+      '¿Quieres ver un ejemplo?',
+      '¿Te gustaría intentarlo tú mismo?',
+      '¿Necesitas una explicación gráfica?'
     ];
     const aiMsg = { role: 'assistant', content, suggestions, ...extra };
-
     await saveChat(userId, [...messages, aiMsg]);
-    res.json({
+
+    return res.json({
       choices: [{ message: aiMsg }],
       respuesta: aiMsg.content,
       suggestions,
@@ -172,12 +203,12 @@ app.post('/api/chat', async (req, res) => {
     });
 
   } catch (err) {
-    console.error('❌ Error en /api/chat:', err);
-    res.status(500).json({ error: err.message });
+    console.error('Error en /api/chat:', err);
+    return res.status(500).json({ error: { message: err.message || String(err) } });
   }
 });
 
-// Endpoint historial
+// Historial
 app.get('/api/history', async (req, res) => {
   try {
     const chat = await loadChat(req.userId);
@@ -187,6 +218,6 @@ app.get('/api/history', async (req, res) => {
   }
 });
 
-app.listen(PORT, () =>
-  console.log(`✅ MIRA backend-router corriendo en http://localhost:${PORT}`)
-);
+app.listen(PORT, () => {
+  console.log(`MIRA backend-router corriendo en http://localhost:${PORT}`);
+});
