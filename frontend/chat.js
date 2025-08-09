@@ -3,7 +3,7 @@ let chatHistory = [];
 let lastSuggestions = [];
 
 /**
- * Crea un span seguro con texto (evita HTML injection).
+ * Crea un span seguro con texto (evita inyección de HTML).
  */
 function safeSpan(text) {
   const span = document.createElement('span');
@@ -12,7 +12,7 @@ function safeSpan(text) {
 }
 
 /**
- * Renderiza el historial de chat, incluyendo imágenes, datos extra y sugerencias.
+ * Renderiza el historial del chat, incluyendo imágenes, datos extra y sugerencias.
  */
 function renderChat() {
   const chatArea = document.getElementById('chat-area');
@@ -24,6 +24,7 @@ function renderChat() {
     bubble.appendChild(safeSpan(msg.content));
     chatArea.appendChild(bubble);
 
+    // Gráficos y extras
     if (msg.plot?.url) {
       const img = document.createElement('img');
       img.src = msg.plot.url;
@@ -126,8 +127,10 @@ async function sendMessage(optionalText) {
   lastSuggestions = [];
   renderChat();
 
-  // Elimina posibles "Sin respuesta." antiguos
-  chatHistory = chatHistory.filter(m => !(m.role === 'assistant' && m.content === 'Sin respuesta.'));
+  // Elimina posibles "Sin respuesta."
+  chatHistory = chatHistory.filter(
+    m => !(m.role === 'assistant' && m.content === 'Sin respuesta.')
+  );
 
   // Prepara payload
   const payload = {
@@ -145,11 +148,12 @@ async function sendMessage(optionalText) {
     const user = firebase.auth().currentUser;
     if (!user) throw new Error('Usuario no autenticado');
     const idToken = await user.getIdToken();
+
     const res = await fetch(API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${idToken}`
+        Authorization: `Bearer ${idToken}`
       },
       body: JSON.stringify(payload)
     });
@@ -233,7 +237,9 @@ firebase.auth().onAuthStateChanged(async user => {
     localStorage.setItem('firebaseToken', idToken);
     const saved = localStorage.getItem('chat_' + user.uid);
     chatHistory = saved ? JSON.parse(saved) : [];
-    chatHistory = chatHistory.filter(m => !(m.role === 'assistant' && m.content === 'Sin respuesta.'));
+    chatHistory = chatHistory.filter(
+      m => !(m.role === 'assistant' && m.content === 'Sin respuesta.')
+    );
     lastSuggestions = [];
     renderChat();
   } else {
@@ -245,7 +251,9 @@ firebase.auth().onAuthStateChanged(async user => {
 window.addEventListener('beforeunload', () => {
   const user = firebase.auth().currentUser;
   if (user) {
-    const cleanHistory = chatHistory.filter(m => !(m.role === 'assistant' && m.content === 'Sin respuesta.'));
+    const cleanHistory = chatHistory.filter(
+      m => !(m.role === 'assistant' && m.content === 'Sin respuesta.')
+    );
     localStorage.setItem('chat_' + user.uid, JSON.stringify(cleanHistory));
   }
 });
@@ -257,7 +265,7 @@ document.getElementById('new-chat-btn').addEventListener('click', () => {
   renderChat();
 });
 
-// Utilidad de limpieza
+// Utilidad de limpieza (solo desarrollo)
 window.clearAllStorage = function () {
   localStorage.clear();
   sessionStorage.clear();
