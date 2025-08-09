@@ -27,10 +27,12 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,h
 
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin ||
-        ALLOWED_ORIGINS.includes(origin) ||
-        /^http:\/\/localhost(:\d+)?$/.test(origin) ||
-        /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/.test(origin)) {
+    if (
+      !origin ||
+      ALLOWED_ORIGINS.includes(origin) ||
+      /^http:\/\/localhost(:\d+)?$/.test(origin) ||
+      /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/.test(origin)
+    ) {
       return cb(null, true);
     }
     return cb(new Error('Origin not allowed by CORS'));
@@ -61,8 +63,9 @@ app.post('/api/chat', async (req, res) => {
     if (imageBase64) {
       const useOCR = isImagePrompt(lastUserMsg);
       const url = useOCR
-        ? (process.env.PYTHON_OCR_URL || 'http://localhost:5001/ocr')
-        : (process.env.PYTHON_BLIP_URL || 'http://localhost:5002/blip');
+        ? process.env.PYTHON_OCR_URL || 'http://localhost:5001/ocr'
+        : process.env.PYTHON_BLIP_URL || 'http://localhost:5002/blip';
+
       const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -89,7 +92,7 @@ app.post('/api/chat', async (req, res) => {
       });
     }
 
-    // 2. Detección de gráficos
+    // 2. Detección de gráficos automáticos
     if (isPlotPrompt(lastUserMsg)) {
       const plotRes = await fetch(process.env.PYTHON_PLOT_URL || 'http://localhost:5000/plot', {
         method: 'POST',
@@ -166,17 +169,21 @@ Si hay una tabla de datos, entrega los valores y etiquetas claros, separados por
     if (wantsMath && process.env.QWEN_API_KEY) {
       modelUrl = 'https://api.endpointhf.com/v1/chat/completions';
       headers = {
-        'Authorization': `Bearer ${process.env.QWEN_API_KEY}`,
+        Authorization: `Bearer ${process.env.QWEN_API_KEY}`,
         'Content-Type': 'application/json'
       };
       body = { model: 'Qwen/Qwen1.5-32B-Chat', messages: modelMessages, temperature: 0.7 };
     } else {
       modelUrl = 'https://api.groq.com/openai/v1/chat/completions';
       headers = {
-        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
         'Content-Type': 'application/json'
       };
-      body = { model: 'meta-llama/llama-4-scout-17b-16e-instruct', messages: modelMessages, temperature: 0.7 };
+      body = {
+        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+        messages: modelMessages,
+        temperature: 0.7
+      };
     }
 
     const modelRes = await fetch(modelUrl, {
@@ -184,8 +191,8 @@ Si hay una tabla de datos, entrega los valores y etiquetas claros, separados por
       headers,
       body: JSON.stringify(body)
     });
-    const data = await modelRes.json();
-    const content = data.choices?.[0]?.message?.content || 'Sin respuesta.';
+    const dataModel = await modelRes.json();
+    const content = dataModel.choices?.[0]?.message?.content || 'Sin respuesta.';
 
     const suggestions = [
       '¿Quieres ver un ejemplo?',
@@ -201,7 +208,6 @@ Si hay una tabla de datos, entrega los valores y etiquetas claros, separados por
       suggestions,
       ...extra
     });
-
   } catch (err) {
     console.error('Error en /api/chat:', err);
     return res.status(500).json({ error: { message: err.message || String(err) } });
