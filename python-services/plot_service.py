@@ -5,6 +5,7 @@ import sympy as sp
 import pandas as pd
 from utils import image_to_base64
 from io import BytesIO
+import base64  # <-- necesario
 
 app = Flask(__name__)
 
@@ -155,3 +156,4 @@ def solve_equation():
 
 if __name__ == "__main__":
     app.run(port=5000, debug=True)
+
