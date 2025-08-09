@@ -59,4 +59,3 @@ export async function verifyFirebaseToken(req, res, next) {
     });
   }
 }
-
