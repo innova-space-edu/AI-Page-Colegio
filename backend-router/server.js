@@ -166,7 +166,7 @@ Si hay una tabla de datos, entrega los valores y etiquetas claros, separados por
     let modelUrl;
     let headers;
     let body;
-    if (wantsMath && process.env.QWEN_API_KEY) {
+    if (wantsMath && process.env.QWEN_API_KEY2) {
       modelUrl = 'https://api.endpointhf.com/v1/chat/completions';
       headers = {
         Authorization: `Bearer ${process.env.QWEN_API_KEY}`,
@@ -227,3 +227,4 @@ app.get('/api/history', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`MIRA backend-router corriendo en http://localhost:${PORT}`);
 });
+
