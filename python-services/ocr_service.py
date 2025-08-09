@@ -4,7 +4,7 @@ from utils import decode_base64_image
 from io import BytesIO
 import os
 
-OCR_API_KEY = os.getenv('OCR_SPACE_API_KEY', 'TU_API_OCR_SPACE')
+OCR_SPACE_API_KEY = os.getenv('OCR_SPACE_API_KEY', 'TU_API_OCR_SPACE')
 
 app = Flask(__name__)
 
@@ -55,3 +55,4 @@ def ocr():
 
 if __name__ == "__main__":
     app.run(port=5001, debug=True)
+
