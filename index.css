@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Fuente personalizada para acentuar la estética futurista */
+body {
+  font-family: 'Inter', sans-serif;
+  line-height: 1.5;
+}
+
+/* Scrollbar estilizado para barras laterales y chat */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: #6322fd;
+  border-radius: 4px;
+}
